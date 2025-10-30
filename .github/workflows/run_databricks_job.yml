@@ -1,19 +1,22 @@
 name: Run Databricks Job via OAuth
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:  # 手動実行用トリガー
 
 jobs:
   run-dbx-job:
     runs-on: ubuntu-latest
 
     steps:
+      # ---- 1. jqインストール（GitHubランナーに入っていないことがある） ----
       - name: Install jq
         run: sudo apt-get update && sudo apt-get install -y jq
 
+      # ---- 2. Databricks OAuthトークンを発行 ----
       - name: Get Databricks OAuth Token
         id: get_token
         run: |
+          echo "Requesting OAuth token from Databricks..."
           response=$(curl -s -X POST \
             -H "Content-Type: application/x-www-form-urlencoded" \
             -d "grant_type=client_credentials" \
@@ -21,13 +24,33 @@ jobs:
             -d "client_secret=${{ secrets.DATABRICKS_CLIENT_SECRET }}" \
             -d "scope=all" \
             ${{ secrets.DATABRICKS_TOKEN_URL }})
-          
-          echo "token=$(echo $response | jq -r .access_token)" >> $GITHUB_OUTPUT
 
+          echo "Full Token Response: $response"  # デバッグ用にレスポンス確認
+          token=$(echo "$response" | jq -r .access_token)
+
+          if [ -z "$token" ] || [ "$token" = "null" ]; then
+            echo "❌ Failed to retrieve token. Response: $response"
+            exit 1
+          fi
+
+          echo "✅ Token successfully retrieved"
+          echo "token=$token" >> $GITHUB_OUTPUT
+
+      # ---- 3. Databricksジョブを実行 ----
       - name: Trigger Databricks Job
         run: |
+          echo "Triggering Databricks job ID ${{ secrets.DATABRICKS_JOB_ID }}..."
           result=$(curl -s -X POST "${{ secrets.DATABRICKS_WORKSPACE_URL }}/api/2.1/jobs/run-now" \
             -H "Authorization: Bearer ${{ steps.get_token.outputs.token }}" \
             -H "Content-Type: application/json" \
             -d "{\"job_id\": ${{ secrets.DATABRICKS_JOB_ID }}}")
+
           echo "Response: $result"
+
+          # 成功・失敗チェック
+          if echo "$result" | grep -q '"run_id"'; then
+            echo "✅ Job triggered successfully."
+          else
+            echo "❌ Job trigger failed. See response above."
+            exit 1
+          fi
