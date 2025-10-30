@@ -8,6 +8,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Install jq  # ← 念のため追加（ランナーに入ってない場合がある）
+        run: sudo apt-get update && sudo apt-get install -y jq
+
       - name: Get Databricks OAuth Token
         id: get_token
         run: |
@@ -16,13 +19,15 @@ jobs:
             -d "grant_type=client_credentials" \
             -d "client_id=${{ secrets.DATABRICKS_CLIENT_ID }}" \
             -d "client_secret=${{ secrets.DATABRICKS_CLIENT_SECRET }}" \
+            -d "scope=all" \   # 👈 これ重要！Databricks OAuthではスコープ指定必須
             ${{ secrets.DATABRICKS_TOKEN_URL }})
           
           echo "token=$(echo $response | jq -r .access_token)" >> $GITHUB_OUTPUT
 
       - name: Trigger Databricks Job
         run: |
-          curl -s -X POST "${{ secrets.DATABRICKS_WORKSPACE_URL }}/api/2.1/jobs/run-now" \
+          result=$(curl -s -X POST "${{ secrets.DATABRICKS_WORKSPACE_URL }}/api/2.1/jobs/run-now" \
             -H "Authorization: Bearer ${{ steps.get_token.outputs.token }}" \
             -H "Content-Type: application/json" \
-            -d "{\"job_id\": ${{ secrets.DATABRICKS_JOB_ID }}}"
+            -d "{\"job_id\": ${{ secrets.DATABRICKS_JOB_ID }}}")
+          echo "Response: $result"
